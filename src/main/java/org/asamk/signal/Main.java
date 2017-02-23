@@ -18,27 +18,12 @@ package org.asamk.signal;
 
 import net.sourceforge.argparse4j.ArgumentParsers;
 import net.sourceforge.argparse4j.impl.Arguments;
-import net.sourceforge.argparse4j.inf.*;
-import org.apache.http.util.TextUtils;
-import org.asamk.Signal;
-import org.asamk.signal.storage.contacts.ContactInfo;
-import org.asamk.signal.storage.groups.GroupInfo;
-import org.asamk.signal.storage.protocol.JsonIdentityKeyStore;
-import org.asamk.signal.util.Base64;
-import org.asamk.signal.util.Hex;
-import org.freedesktop.dbus.DBusConnection;
-import org.freedesktop.dbus.DBusSigHandler;
-import org.freedesktop.dbus.exceptions.DBusException;
-import org.freedesktop.dbus.exceptions.DBusExecutionException;
-import org.whispersystems.libsignal.InvalidKeyException;
-import org.whispersystems.signalservice.api.crypto.UntrustedIdentityException;
-import org.whispersystems.signalservice.api.messages.*;
-import org.whispersystems.signalservice.api.messages.multidevice.*;
-import org.whispersystems.signalservice.api.push.SignalServiceAddress;
-import org.whispersystems.signalservice.api.push.exceptions.EncapsulatedExceptions;
-import org.whispersystems.signalservice.api.push.exceptions.NetworkFailureException;
-import org.whispersystems.signalservice.api.push.exceptions.UnregisteredUserException;
-import org.whispersystems.signalservice.api.util.PhoneNumberFormatter;
+import net.sourceforge.argparse4j.inf.ArgumentParser;
+import net.sourceforge.argparse4j.inf.ArgumentParserException;
+import net.sourceforge.argparse4j.inf.MutuallyExclusiveGroup;
+import net.sourceforge.argparse4j.inf.Namespace;
+import net.sourceforge.argparse4j.inf.Subparser;
+import net.sourceforge.argparse4j.inf.Subparsers;
 
 import java.io.File;
 import java.io.IOException;
@@ -50,9 +35,48 @@ import java.nio.charset.Charset;
 import java.security.Security;
 import java.text.DateFormat;
 import java.text.SimpleDateFormat;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Date;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.TimeZone;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+
+import org.apache.http.util.TextUtils;
+import org.asamk.Signal;
+import org.asamk.signal.commands.AbstractCommand;
+import org.asamk.signal.commands.CommandException;
+import org.asamk.signal.commands.RegisterCommand;
+import org.asamk.signal.commands.UnregisterCommand;
+import org.asamk.signal.storage.contacts.ContactInfo;
+import org.asamk.signal.storage.groups.GroupInfo;
+import org.asamk.signal.storage.protocol.JsonIdentityKeyStore;
+import org.asamk.signal.util.Base64;
+import org.asamk.signal.util.Hex;
+import org.freedesktop.dbus.DBusConnection;
+import org.freedesktop.dbus.DBusSigHandler;
+import org.freedesktop.dbus.exceptions.DBusException;
+import org.freedesktop.dbus.exceptions.DBusExecutionException;
+import org.whispersystems.libsignal.InvalidKeyException;
+import org.whispersystems.signalservice.api.crypto.UntrustedIdentityException;
+import org.whispersystems.signalservice.api.messages.SignalServiceAttachment;
+import org.whispersystems.signalservice.api.messages.SignalServiceAttachmentPointer;
+import org.whispersystems.signalservice.api.messages.SignalServiceContent;
+import org.whispersystems.signalservice.api.messages.SignalServiceDataMessage;
+import org.whispersystems.signalservice.api.messages.SignalServiceEnvelope;
+import org.whispersystems.signalservice.api.messages.SignalServiceGroup;
+import org.whispersystems.signalservice.api.messages.multidevice.BlockedListMessage;
+import org.whispersystems.signalservice.api.messages.multidevice.DeviceInfo;
+import org.whispersystems.signalservice.api.messages.multidevice.ReadMessage;
+import org.whispersystems.signalservice.api.messages.multidevice.SentTranscriptMessage;
+import org.whispersystems.signalservice.api.messages.multidevice.SignalServiceSyncMessage;
+import org.whispersystems.signalservice.api.push.SignalServiceAddress;
+import org.whispersystems.signalservice.api.push.exceptions.EncapsulatedExceptions;
+import org.whispersystems.signalservice.api.push.exceptions.NetworkFailureException;
+import org.whispersystems.signalservice.api.push.exceptions.UnregisteredUserException;
+import org.whispersystems.signalservice.api.util.PhoneNumberFormatter;
 
 public class Main {
 
@@ -127,37 +151,23 @@ public class Main {
                 }
             }
 
+            AbstractCommand command = null;
             switch (ns.getString("command")) {
                 case "register":
                     if (dBusConn != null) {
                         System.err.println("register is not yet implemented via dbus");
                         return 1;
                     }
-                    if (!m.userHasKeys()) {
-                        m.createNewIdentity();
-                    }
-                    try {
-                        m.register(ns.getBoolean("voice"));
-                    } catch (IOException e) {
-                        System.err.println("Request verify error: " + e.getMessage());
-                        return 3;
-                    }
+                    
+                    command = new RegisterCommand(ns, m);
                     break;
                 case "unregister":
                     if (dBusConn != null) {
                         System.err.println("unregister is not yet implemented via dbus");
                         return 1;
                     }
-                    if (!m.isRegistered()) {
-                        System.err.println("User is not registered.");
-                        return 1;
-                    }
-                    try {
-                        m.unregister();
-                    } catch (IOException e) {
-                        System.err.println("Unregister error: " + e.getMessage());
-                        return 3;
-                    }
+                    
+                    command = new UnregisterCommand(ns, m);
                     break;
                 case "updateAccount":
                     if (dBusConn != null) {
@@ -631,6 +641,17 @@ public class Main {
 
                     break;
             }
+            
+            if (command != null) {
+                try {
+                    command.execute();
+                }
+                catch (CommandException e) {
+                    System.err.println(e.getMessage());
+                    return 1;
+                }
+            }
+            
             return 0;
         } finally {
             if (dBusConn != null) {
